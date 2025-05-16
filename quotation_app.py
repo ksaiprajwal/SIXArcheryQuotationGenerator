@@ -13,7 +13,7 @@ SIGNATURE_PATH = "signature.png"
 from datetime import datetime
 
 def get_today():
-    return datetime.now().strftime("%Y-%m-%d")
+    return datetime.now().strftime("%d-%m-%Y")
 
 # --- Sidebar: Instructions ---
 st.sidebar.header("Instructions")
