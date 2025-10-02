@@ -7,13 +7,13 @@ st.set_page_config(page_title="Archery Quotation Generator", layout="centered")
 st.title("SIX Archery Quotation Generator")
 
 # --- Company Branding (actual images) ---
-COMPANY_HEADER_PATH = "header.jpg"
+COMPANY_HEADER_PATH = "header.png"
 SIGNATURE_PATH = "signature.png"
 
 from datetime import datetime
 
 def get_today():
-    return datetime.now().strftime("%d-%m-%Y")
+    return datetime.now().strftime("%d %m %Y")
 
 # --- Sidebar: Instructions ---
 st.sidebar.header("Instructions")
@@ -49,10 +49,10 @@ if st.button("Add Product"):
 # --- Dynamic Total Calculation ---
 valid_products = [p for p in products if p.get('quantity') and p.get('price')]
 total = sum(p['quantity'] * p['price'] for p in valid_products)
-tax = total * 0.12
+tax = total * 0.05
 grand_total = total + tax
 st.markdown(f"**Current Total:** ₹{total:.2f}  ")
-st.markdown(f"**Tax (12%):** ₹{tax:.2f}  ")
+st.markdown(f"**Tax (5%):** ₹{tax:.2f}  ")
 st.markdown(f"**Grand Total:** ₹{grand_total:.2f}")
 
 # --- Address and Date ---
@@ -107,31 +107,53 @@ def generate_pdf(products, address, date_val, instructions, header_path, signatu
     # Table header
     pdf.set_font("Arial", '', 10)
     pdf.set_fill_color(220, 220, 220)
-    pdf.cell(80, 8, 'Product', 1, 0, 'C', 1)
-    pdf.cell(30, 8, 'Quantity', 1, 0, 'C', 1)
-    pdf.cell(40, 8, 'Rate', 1, 0, 'C', 1)
-    pdf.cell(40, 8, 'Total', 1, 1, 'C', 1)
+    pdf.cell(12, 8, 'S.No', 1, 0, 'C', 1)
+    pdf.cell(75, 8, 'Product', 1, 0, 'C', 1)
+    pdf.cell(28, 8, 'Quantity', 1, 0, 'C', 1)
+    pdf.cell(35, 8, 'Rate', 1, 0, 'C', 1)
+    pdf.cell(35, 8, 'Total', 1, 1, 'C', 1)
     # Table rows
     pdf.set_fill_color(255, 255, 255)
-    for p in products:
+    for idx, p in enumerate(products, 1):
         total = p['quantity'] * p['price']
-        pdf.cell(80, 8, p['name'], 1)
-        pdf.cell(30, 8, str(p['quantity']), 1)
-        pdf.cell(40, 8, f"{p['price']:.2f}", 1)
-        pdf.cell(40, 8, f"{total:.2f}", 1, ln=1)
+        # Save the current position
+        x_start = pdf.get_x()
+        y_start = pdf.get_y()
+        # Calculate height needed for product name
+        product_name_width = 75
+        line_height = 8
+        # Estimate number of lines for product name
+        pdf.set_font("Arial", '', 10)
+        product_name_lines = pdf.multi_cell(product_name_width, line_height, p['name'], border=0, align='L', split_only=True)
+        n_lines = len(product_name_lines)
+        row_height = line_height * n_lines
+        # S.No
+        pdf.set_xy(x_start, y_start)
+        pdf.cell(12, row_height, str(idx), 1, 0, 'C')
+        # Product Name
+        pdf.set_xy(x_start + 12, y_start)
+        pdf.multi_cell(product_name_width, line_height, p['name'], border=1, align='L')
+        # Move to right for rest of row
+        x_next = x_start + 12 + product_name_width
+        y_next = y_start
+        pdf.set_xy(x_next, y_next)
+        pdf.cell(28, row_height, str(p['quantity']), 1, 0, 'L')
+        pdf.cell(35, row_height, f"{p['price']:.2f}", 1, 0, 'L')
+        pdf.cell(35, row_height, f"{total:.2f}", 1, 0, 'L')
+        pdf.ln(row_height)
     # Total, Tax, Grand Total
     total = sum(p['quantity'] * p['price'] for p in products)
-    tax = total * 0.12
+    tax = total * 0.05
     grand_total = total + tax
     pdf.set_font("Arial", 'B', 10)
-    pdf.cell(150, 8, 'Total', 1)
-    pdf.cell(40, 8, f"{total:.2f}", 1, ln=1)
+    pdf.cell(150, 8, 'Total', 1, 0, 'R')
+    pdf.cell(35, 8, f"{total:.2f}", 1, 1, 'L')
     pdf.set_font("Arial", '', 10)
-    pdf.cell(150, 8, 'Tax (12%)', 1)
-    pdf.cell(40, 8, f"{tax:.2f}", 1, ln=1)
+    pdf.cell(150, 8, 'Tax (5%)', 1, 0, 'R')
+    pdf.cell(35, 8, f"{tax:.2f}", 1, 1, 'L')
     pdf.set_font("Arial", 'B', 10)
-    pdf.cell(150, 8, 'Grand Total', 1)
-    pdf.cell(40, 8, f"{grand_total:.2f}", 1, ln=1)
+    pdf.cell(150, 8, 'Grand Total', 1, 0, 'R')
+    pdf.cell(35, 8, f"{grand_total:.2f}", 1, 1, 'L')
     pdf.ln(8)
     # Special instructions
     pdf.set_font("Arial", '', 10)
