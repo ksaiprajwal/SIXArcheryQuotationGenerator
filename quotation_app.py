@@ -167,21 +167,29 @@ if st.button('＋ Add another item', use_container_width=True):
     st.rerun()
 
 st.markdown('### 3. Tax & notes')
-modes = ['CGST + SGST', 'IGST', 'No GST', 'Choose individually']
-initial = 1 if 'IGST' in doc['taxes'] else (0 if set(doc['taxes']) == {'CGST','SGST'} else (2 if not doc['taxes'] else 3))
-mode = st.selectbox('Tax to show on this document', modes, index=initial, key=prefix+'taxmode')
-if mode == 'Choose individually':
-    choices = st.multiselect('Tax rows', ['CGST','SGST','IGST'], default=list(doc['taxes']), key=prefix+'taxchoices')
-else:
-    choices = {'CGST + SGST':['CGST','SGST'], 'IGST':['IGST'], 'No GST':[]}[mode]
+
+def select_tax(name):
+    if st.session_state[prefix+'tax_'+name]:
+        others = ('CGST', 'SGST') if name == 'IGST' else ('IGST',)
+        for other in others:
+            st.session_state[prefix+'tax_'+other] = False
+
 rates = {}
-for name in choices:
-    rates[name] = st.number_input(f'{name} rate (%)', min_value=0.0, max_value=100.0,
-        value=float(doc['taxes'].get(name, 12.0 if name == 'IGST' else 6.0)), step=0.5, key=prefix+name)
+for name in ('CGST', 'SGST', 'IGST'):
+    tax_key = prefix+'tax_'+name
+    if tax_key not in st.session_state:
+        st.session_state[tax_key] = name in doc['taxes']
+    checkbox, rate_input = st.columns([1, 1], vertical_alignment='center')
+    enabled = checkbox.checkbox(name, key=tax_key,
+                                on_change=select_tax, args=(name,))
+    rate = rate_input.number_input(f'{name} rate (%)', min_value=0.0, max_value=100.0,
+                                   value=float(doc['taxes'].get(name, 12.0 if name == 'IGST' else 6.0)),
+                                   step=0.5, disabled=not enabled, key=prefix+'rate_'+name)
+    if enabled:
+        rates[name] = rate
 doc['taxes'] = rates
-if 'IGST' in rates and ('CGST' in rates or 'SGST' in rates):
-    st.error('Select IGST or CGST / SGST. Remove the conflicting tax rows before saving.')
-text('Message at the top (optional)', 'top_note', area=True, max_chars=1000, placeholder='For example: Kind attention: Coach Sharma')
+st.caption('Tick the taxes to include. Rates for unticked taxes are greyed out and omitted from the PDF.')
+text('Message inside the buyer box (optional)', 'top_note', area=True, max_chars=1000, placeholder='For example: Kind attention: Coach Sharma')
 with st.expander('Bottom notes & signature'):
     text('Notes / terms', 'notes', area=True, max_chars=3000)
     doc['signed'] = st.checkbox('Include saved signature', value=doc['signed'], key=prefix+'signed')
