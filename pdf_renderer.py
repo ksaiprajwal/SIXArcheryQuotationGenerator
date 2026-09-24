@@ -143,28 +143,36 @@ def generate_pdf(doc):
         c.drawImage(image, x-crop_x*scale_x, PAGE_H-y-ih*scale_y, width=iw*scale_x, height=ih*scale_y, mask='auto')
         c.restoreState()
 
-    # The optional note sits above the form; the item area absorbs its height.
+    # Keep the message with the customer, inside the printed buyer box.
     note = doc.get('top_note', '').strip()
-    note_height = _paragraph(note, RIGHT-LEFT, 9)[1] + 3*mm if note else 0
-    if note_height > 45*mm:
-        raise ValueError('The top message is too long for the bill. Move some of it to the bottom notes.')
-    top = 10*mm + note_height
+    note_h = _paragraph(note, 167*mm, 9)[1] if note else 0
+    top = 10*mm
     brand_top = top + 8*mm
     buyer_top = brand_top + 34*mm
     buyer_text = '\n'.join(filter(None, [doc['buyer'], doc['address']]))
     buyer_p, _ = _paragraph(buyer_text, 169*mm, 10)
     buyer_p.style.leading = 6.5*mm
     _, buyer_h = buyer_p.wrap(169*mm, PAGE_H*10)
-    buyer_height = max(18*mm, buyer_h + 5*mm)
+    buyer_height = max(18*mm, buyer_h + 5*mm + (note_h + 2*mm if note else 0))
     if buyer_height > 60*mm:
-        raise ValueError('The customer address is too long. Please shorten it to fit the bill.')
+        raise ValueError('The customer details or top message are too long for the buyer box. Move some text to the bottom notes.')
     meta_top = buyer_top + buyer_height
-    table_top = meta_top + 20*mm
+    state = doc.get('state', '').strip()
+    state_code = doc.get('state_code', '').strip()
+    buyer_gstin = doc.get('buyer_gstin', '').strip()
+    dispatch = doc.get('dispatch', '').strip()
+    freight = doc.get('freight', '').strip()
+    metadata_rows = []
+    if state or state_code or dispatch:
+        metadata_rows.append('delivery')
+    if buyer_gstin or freight:
+        metadata_rows.append('tax_and_freight')
+    table_top = meta_top + len(metadata_rows)*10*mm
     grid_top = table_top + 9*mm
     grid_bottom = 225*mm
     grid_height = grid_bottom - grid_top
     if grid_height < 25*mm:
-        raise ValueError('Please shorten the top message or customer address to leave room for the items.')
+        raise ValueError('Please shorten the customer details to leave room for the items.')
     columns = [10, 20, 118, 132, 148, 165, 192, 200]
     xs = [v*mm for v in columns]
     row_min = 9*mm
@@ -191,11 +199,9 @@ def generate_pdf(doc):
     carried = Decimal('0.00')
     for page_index, page_rows in enumerate(pages):
         last = page_index == len(pages)-1
-        if note:
-            block(note, LEFT, 10*mm, RIGHT-LEFT, note_height-2*mm, 9)
         shade(LEFT, table_top, RIGHT-LEFT, grid_top-table_top)
         box(LEFT, top, RIGHT-LEFT, BOTTOM-top, .8)
-        for y in [brand_top, buyer_top, meta_top, table_top, grid_top, grid_bottom, 267*mm]:
+        for y in sorted(set([brand_top, buyer_top, meta_top, table_top, grid_top, grid_bottom, 267*mm])):
             line(LEFT, y, RIGHT, y)
         # Thin top strip: company GSTIN, document type, phone.
         text('GSTIN: '+company['gstin'], 12*mm, top+1.6*mm, 71*mm, 9)
@@ -220,20 +226,45 @@ def generate_pdf(doc):
         # Digital customer details stay clean inside the original field boxes.
         text('Buyer', 12*mm, buyer_top+3*mm, 16*mm, 9)
         buyer_p.drawOn(c, 29*mm, PAGE_H-buyer_top-2.5*mm-buyer_h)
+        if note:
+            note_y = buyer_top + 4.5*mm + buyer_h
+            text('Message', 12*mm, note_y+mm, 17*mm, 8.5)
+            block(note, 29*mm, note_y, 167*mm, note_h, 9, minimum=9)
         split = 116*mm
-        line(split, meta_top, split, table_top)
-        text('State', 12*mm, meta_top+4*mm, 16*mm, 9)
-        block(doc['state'], 28*mm, meta_top+3*mm, 58*mm, 7*mm, 9)
-        text('Code', 88*mm, meta_top+4*mm, 12*mm, 8.5)
-        box(101*mm, meta_top+3*mm, 12*mm, 7*mm)
-        text(doc['state_code'], 102*mm, meta_top+4*mm, 10*mm, 10, align='center')
-        text('GSTIN', 12*mm, meta_top+13*mm, 17*mm, 9)
-        box(29*mm, meta_top+11.5*mm, 84*mm, 7*mm)
-        text(doc['buyer_gstin'], 31*mm, meta_top+12.8*mm, 80*mm, 10)
-        text('Despatch Through', 118*mm, meta_top+3*mm, 38*mm, 8.5)
-        block(doc['dispatch'], 157*mm, meta_top+2*mm, 40*mm, 8*mm, 8.5, minimum=6.5)
-        text('Freight', 118*mm, meta_top+13*mm, 17*mm, 9)
-        block(doc.get('freight', ''), 137*mm, meta_top+12*mm, 60*mm, 7*mm, 9)
+        for row_index, row in enumerate(metadata_rows):
+            row_top = meta_top + row_index*10*mm
+            if row_index:
+                line(LEFT, row_top, RIGHT, row_top)
+            if row == 'delivery':
+                left_present = bool(state or state_code)
+                if left_present and dispatch:
+                    line(split, row_top, split, row_top+10*mm)
+                if state:
+                    text('State', 12*mm, row_top+3*mm, 16*mm, 9)
+                    block(state, 28*mm, row_top+2*mm,
+                          58*mm if state_code else (84*mm if dispatch else 166*mm), 7*mm, 9)
+                if state_code:
+                    code_x = 88*mm if state else 12*mm
+                    text('Code', code_x, row_top+3*mm, 12*mm, 8.5)
+                    box(code_x+13*mm, row_top+2*mm, 12*mm, 7*mm)
+                    text(state_code, code_x+14*mm, row_top+3*mm, 10*mm, 10, align='center')
+                if dispatch:
+                    dispatch_x = 118*mm if left_present else 12*mm
+                    text('Despatch Through', dispatch_x, row_top+3*mm, 38*mm, 8.5)
+                    block(dispatch, dispatch_x+39*mm, row_top+2*mm,
+                          40*mm if left_present else 145*mm, 8*mm, 8.5, minimum=6.5)
+            else:
+                if buyer_gstin and freight:
+                    line(split, row_top, split, row_top+10*mm)
+                if buyer_gstin:
+                    text('GSTIN', 12*mm, row_top+3*mm, 17*mm, 9)
+                    box(29*mm, row_top+1.5*mm, 84*mm, 7*mm)
+                    text(buyer_gstin, 31*mm, row_top+2.8*mm, 80*mm, 10)
+                if freight:
+                    freight_x = 118*mm if buyer_gstin else 12*mm
+                    text('Freight', freight_x, row_top+3*mm, 17*mm, 9)
+                    block(freight, freight_x+19*mm, row_top+2*mm,
+                          60*mm if buyer_gstin else 166*mm, 7*mm, 9)
         # Full-height ruled table, with separate rupees/paise columns.
         for x in xs[1:-1]:
             line(x, table_top if x != xs[-2] else table_top+4*mm, x, grid_bottom)
@@ -257,15 +288,12 @@ def generate_pdf(doc):
             text(fraction, xs[6]+mm, y+2*mm, 6*mm, 9.5, align='right')
             y += height
             line(LEFT, y, RIGHT, y, .3)
-        # Keep blank ruled rows down to the totals, just like the stationery.
-        next_number = page_rows[-1][0]+2 if page_rows else 1
+        # Keep the familiar ruled stationery, without numbering unused lines.
         blank_count = max(0, round((grid_bottom-y)/row_min))
         blank_height = (grid_bottom-y)/blank_count if blank_count else 0
         for _ in range(blank_count):
-            text(next_number, xs[0]+mm, y+2*mm, 8*mm, 9, align='center')
             y += blank_height
             line(LEFT, y, RIGHT, y, .3)
-            next_number += 1
         footer_split = 136*mm
         line(footer_split, grid_bottom, footer_split, BOTTOM)
         page_total = sum((line_amounts[row[0]] for row in page_rows), Decimal('0.00'))
