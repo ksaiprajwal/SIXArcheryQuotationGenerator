@@ -53,9 +53,9 @@ cloud persistence. No provider account or billable resource is provisioned by th
    GitHub.
 3. The existing Streamlit app uses `quotation_app.py` and installs dependencies
    from `requirements.txt`; tables and indexes are created on first connection.
-4. Set the confirmed shop GSTIN and bank/contact details in private settings.
-   The shop GSTIN appears in the company header; the buyer GSTIN is a separate
-   optional field. Shop details are editable under the collapsed shop section;
+4. The shop GSTIN defaults to `36APAPK0224P12Y`. Set bank/contact details in
+   private settings. The buyer GSTIN is a separate optional field. Shop details
+   are editable under the collapsed shop section;
    configure permanent defaults with `COMPANY_NAME`, `COMPANY_ADDRESS`,
    `COMPANY_PHONE`, `COMPANY_GSTIN`, `COMPANY_BANK`, and `COMPANY_TAGLINE` secrets.
 5. Create a test quotation, save it, reopen it on a second session, edit it, and
