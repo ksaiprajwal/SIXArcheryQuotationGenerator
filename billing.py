@@ -18,8 +18,8 @@ def item():
 def new_document(kind='Quotation', company=None):
     return {'id': uuid4().hex, 'version': 0, 'number': '', 'kind': kind,
             'date': date.today().isoformat(), 'buyer': '', 'address': '',
-            'buyer_gstin': '', 'state': '', 'state_code': '', 'dispatch': '',
-            'top_note': '', 'notes': 'Transportation cost extra.',
+            'buyer_gstin': '', 'state': '', 'state_code': '', 'dispatch': '', 'freight': '',
+            'top_note': '', 'notes': ('1. Goods once sold will not be taken back.\n2. All disputes subject to Hyderabad Jurisdiction only.' if kind == 'Bill' else 'Transportation cost extra.'),
             'items': [item()], 'taxes': {'CGST': 6.0, 'SGST': 6.0},
             'company': deepcopy(company or DEFAULT_COMPANY), 'signed': False}
 

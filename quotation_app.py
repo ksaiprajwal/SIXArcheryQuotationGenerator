@@ -139,6 +139,7 @@ if screen == 'Saved documents':
     st.stop()
 
 doc = st.session_state.doc
+doc.setdefault('freight', '')
 prefix = f"{doc['id']}-{st.session_state.edit_epoch}-"
 def text(label, field, area=False, **kwargs):
     fn = st.text_area if area else st.text_input
@@ -155,6 +156,7 @@ with st.expander('Customer GST & delivery details (optional)'):
     text('State', 'state', max_chars=80)
     text('State code', 'state_code', max_chars=2)
     text('Dispatch through', 'dispatch', max_chars=150)
+    text('Freight note (not added to total)', 'freight', max_chars=100)
 
 st.markdown('### 2. Items')
 for index, product in enumerate(doc['items']):

@@ -13,8 +13,11 @@ A phone-friendly Streamlit app with editable saved documents and professionally 
   remain editable. IGST cannot be combined with CGST/SGST. These defaults are
   the owner's requested values, not an automated tax determination.
 - Optional top message, HSN, buyer GSTIN, state/code, dispatch, notes and signature.
-- A4 PDFs with red branding, alternating table rows, repeated headings, wrapped
-  descriptions, a totals panel, bank details and page numbers.
+- A4 PDFs matching the printed shop bill: original archer at left, red shop
+  name, thin outlined boxes, 14 ruled rows, rupees/paise columns, amount in Indian
+  words, bank details and a bottom-right signature. Long items wrap; additional
+  pages repeat the form and carry forward totals. Long notes use an appendix.
+- Optional freight annotation (informational; not added to the amount).
 - Decimal calculations and optimistic version checks prevent lost concurrent edits.
 
 ## Free-first deployment: existing Streamlit + Neon PostgreSQL
@@ -79,7 +82,7 @@ in its revision row. Monitor storage as the history grows.
 ```bash
 python -m pip install -r requirements.txt
 LOCAL_DEMO=true python -m streamlit run quotation_app.py
-python -m pip install pytest
+python -m pip install -r requirements-dev.txt
 python -m pytest tests -q
 ```
 
