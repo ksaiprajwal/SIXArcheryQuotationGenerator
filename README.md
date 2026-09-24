@@ -38,16 +38,15 @@ cloud persistence. No provider account or billable resource is provisioned by th
 
    ```toml
    DATABASE_URL = "postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require"
-   APP_PASSWORD = "replace-with-a-long-unique-password"
-   COMPANY_GSTIN = "verify-and-enter-the-correct-shop-GSTIN"
+   COMPANY_GSTIN = "36APAPK0224P12Y"
    ```
 
-   Use at least 12 characters for the password. Do not commit credentials to
-   GitHub. Prefer Streamlit's private-app access settings as an additional login
-   gate for the shop. The in-app password is a simple shared-shop gate, not a
-   multi-user authentication system with rate limiting or account recovery.
-3. Review and merge the pull request, or test its branch in a separate Streamlit
-   app first. Select `quotation_app.py` and Python 3.12. Requirements are installed
+   `APP_PASSWORD` is no longer used. The app opens directly without a login.
+   Anyone who can open the app can view, edit and download its saved customer
+   documents. If you later share its URL, consider enabling private-app access
+   in Streamlit or adding authentication. Do not commit database credentials to
+   GitHub.
+3. The existing Streamlit app uses `quotation_app.py` and installs dependencies
    from `requirements.txt`; tables and indexes are created on first connection.
 4. Set the confirmed shop GSTIN and bank/contact details in private settings.
    The shop GSTIN appears in the company header; the buyer GSTIN is a separate
@@ -88,10 +87,9 @@ python -m pip install -r requirements-dev.txt
 python -m pytest tests -q
 ```
 
-`LOCAL_DEMO=true` is explicitly local-only: it creates ignored `local-demo.sqlite`
-and bypasses the password gate. **Do not enable it in a hosted deployment.**
-Without database/password configuration, production mode stops with setup guidance
-rather than silently using temporary storage.
+`LOCAL_DEMO=true` is explicitly local-only: it creates ignored `local-demo.sqlite`.
+**Do not enable it in a hosted deployment.** Without database configuration,
+production mode stops with setup guidance rather than silently using temporary storage.
 
 The sample generator in `examples/` uses fictional details; generated PDFs are
 ignored by git. Customer-facing samples can use private shop settings. Font
