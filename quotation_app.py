@@ -1,5 +1,4 @@
 from copy import deepcopy
-import hmac
 import os
 from datetime import date
 from pathlib import Path
@@ -26,22 +25,11 @@ def setting(name, default=''):
         return os.environ.get(name, default)
 
 local = setting('LOCAL_DEMO', 'false').lower() == 'true'
-password = setting('APP_PASSWORD')
 st.title('Shoot In X Archery')
 st.caption('Bills & quotations, made simple.')
 if not local:
-    if not password or len(password) < 12:
-        st.info('One-time setup needed: add DATABASE_URL and a strong APP_PASSWORD in Streamlit settings. See the README in GitHub.')
-        st.stop()
-    if not st.session_state.get('authenticated'):
-        with st.form('login'):
-            entered = st.text_input('Shop password', type='password')
-            if st.form_submit_button('Open my documents', type='primary', use_container_width=True):
-                if hmac.compare_digest(entered.encode(), password.encode()):
-                    st.session_state.authenticated = True
-                    st.rerun()
-                else:
-                    st.error('Incorrect password. Please try again.')
+    if not setting('DATABASE_URL'):
+        st.info('One-time setup needed: add DATABASE_URL in Streamlit settings. See the README in GitHub.')
         st.stop()
 else:
     st.warning('Local demo: saved documents are on this computer only. Do not use this mode on Streamlit Cloud.')
