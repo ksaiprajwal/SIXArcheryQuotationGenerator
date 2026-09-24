@@ -17,6 +17,8 @@ A phone-friendly Streamlit app with editable saved documents and professionally 
   name, thin outlined boxes, 14 ruled rows, rupees/paise columns, amount in Indian
   words, bank details and a bottom-right signature. Long items wrap; additional
   pages repeat the form and carry forward totals. Long notes use an appendix.
+  The formal finish uses one font family, light charcoal rules, subtle grey
+  table-header/grand-total shading, clean digital fields and consistent alignment.
 - Optional freight annotation (informational; not added to the amount).
 - Decimal calculations and optimistic version checks prevent lost concurrent edits.
 

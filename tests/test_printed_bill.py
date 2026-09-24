@@ -26,8 +26,8 @@ def test_fourteen_rows_and_page_overflow():
     assert len(two.pages) == 2
     first, last = (page.extract_text() for page in two.pages)
     assert 'Equipment item 15' in last and 'Equipment item 15' not in first
-    assert 'CARRY FWD' in first and 'G.TOTAL' not in first
-    assert 'G.TOTAL' in last and 'CGST 6%' in last
+    assert 'CARRY FWD' in first and 'G. TOTAL' not in first
+    assert 'G. TOTAL' in last and 'CGST 6%' in last
     assert 'DESCRIPTION OF GOODS' in first and 'DESCRIPTION OF GOODS' in last
 
 
