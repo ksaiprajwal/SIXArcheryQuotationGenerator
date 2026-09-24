@@ -1,3 +1,4 @@
-streamlit
-fpdf
-pillow
+streamlit>=1.40,<2
+reportlab>=4.2,<5
+psycopg[binary]>=3.2,<4
+pillow>=10,<13

@@ -1,0 +1,8 @@
+.streamlit/secrets.toml
+*.sqlite
+*.sqlite-*
+__pycache__/
+.pytest_cache/
+.venv/
+tmp/
+examples/*.pdf
