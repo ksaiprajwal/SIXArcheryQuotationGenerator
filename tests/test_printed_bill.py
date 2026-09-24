@@ -1,6 +1,7 @@
 from copy import deepcopy
 from io import BytesIO
 from decimal import Decimal
+import pdfplumber
 from pypdf import PdfReader
 import pytest
 from billing import new_document, item
@@ -18,17 +19,54 @@ def document(count=2):
     return d
 
 
-def test_fourteen_rows_and_page_overflow():
+def test_rows_continue_and_totals_follow_final_item():
     one = PdfReader(BytesIO(generate_pdf(document(14))))
     assert len(one.pages) == 1
     assert 'Equipment item 14' in one.pages[0].extract_text()
-    two = PdfReader(BytesIO(generate_pdf(document(15))))
+    two = PdfReader(BytesIO(generate_pdf(document(20))))
     assert len(two.pages) == 2
     first, last = (page.extract_text() for page in two.pages)
-    assert 'Equipment item 15' in last and 'Equipment item 15' not in first
+    assert 'Equipment item 20' in last and 'Equipment item 20' not in first
     assert 'CARRY FWD' in first and 'G. TOTAL' not in first
     assert 'G. TOTAL' in last and 'CGST 6%' in last
     assert 'DESCRIPTION OF GOODS' in first and 'DESCRIPTION OF GOODS' in last
+    for index in range(1, 21):
+        assert first.count(f'Equipment item {index}\n') + last.count(f'Equipment item {index}\n') == 1
+
+
+def test_top_message_and_optional_metadata_stay_within_customer_box():
+    d = document()
+    d['top_note'] = 'For the coaching team'
+    plain = generate_pdf(d)
+    with pdfplumber.open(BytesIO(plain)) as pdf:
+        page = pdf.pages[0]
+        buyer_y = page.search('Example customer')[0]['top']
+        message_y = page.search('For the coaching team')[0]['top']
+        heading_y = page.search('DESCRIPTION OF GOODS')[0]['top']
+        assert buyer_y < message_y < heading_y
+    plain_text = PdfReader(BytesIO(plain)).pages[0].extract_text()
+    assert 'State' not in plain_text
+    assert 'Despatch Through' not in plain_text and 'Freight' not in plain_text
+    assert plain_text.splitlines().count('GSTIN') == 0  # No empty buyer GSTIN box.
+
+    d.update(state='Telangana', state_code='36', buyer_gstin='CUSTOMER-GSTIN',
+             dispatch='Courier', freight='Extra')
+    with pdfplumber.open(BytesIO(generate_pdf(d))) as pdf:
+        with pdfplumber.open(BytesIO(plain)) as original:
+            original_heading = original.pages[0].search('DESCRIPTION OF GOODS')[0]['top']
+        detailed_heading = pdf.pages[0].search('DESCRIPTION OF GOODS')[0]['top']
+        assert 19*72/25.4 < detailed_heading - original_heading < 21*72/25.4
+    assert PdfReader(BytesIO(generate_pdf(d))).pages[0].extract_text().splitlines().count('GSTIN') == 1
+
+
+def test_only_filled_item_rows_receive_serial_numbers():
+    d = document(20)
+    with pdfplumber.open(BytesIO(generate_pdf(d))) as pdf:
+        numbers = []
+        for page in pdf.pages:
+            words = page.crop((10*72/25.4, 80*72/25.4, 20*72/25.4, 225*72/25.4)).extract_words()
+            numbers += [int(w['text']) for w in words if w['text'].isdigit()]
+        assert numbers == list(range(1, 21))
 
 
 def test_printed_fields_selected_taxes_and_logo():
