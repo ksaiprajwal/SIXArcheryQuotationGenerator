@@ -12,7 +12,8 @@ A phone-friendly Streamlit app with editable saved documents and professionally 
 - CGST 6% + SGST 6%, IGST 12%, no GST, or individually selected rows. Rates
   remain editable. IGST cannot be combined with CGST/SGST. These defaults are
   the owner's requested values, not an automated tax determination.
-- Optional top message, HSN, buyer GSTIN, state/code, dispatch, notes and signature.
+- Optional message inside the buyer box, HSN, buyer GSTIN, state/code, dispatch,
+  notes and signature. Unfilled customer/delivery fields and their boxes are omitted.
 - A4 PDFs matching the printed shop bill: original archer at left, red shop
   name, thin outlined boxes, 14 ruled rows, rupees/paise columns, amount in Indian
   words, bank details and a bottom-right signature. Long items wrap; additional
@@ -20,6 +21,10 @@ A phone-friendly Streamlit app with editable saved documents and professionally 
   The formal finish uses one font family, light charcoal rules, subtle grey
   table-header/grand-total shading, clean digital fields and consistent alignment.
 - Optional freight annotation (informational; not added to the amount).
+- Only actual items receive serial numbers. Items continue on new pages as needed,
+  with final taxes and grand total after the last item. Tax selection uses three
+  checkboxes with disabled rates for unselected taxes; IGST clears CGST/SGST and
+  selecting either of those clears IGST.
 - Decimal calculations and optimistic version checks prevent lost concurrent edits.
 
 ## Free-first deployment: existing Streamlit + Neon PostgreSQL
