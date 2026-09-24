@@ -8,7 +8,7 @@ DEFAULT_COMPANY = {
     'name': 'SHOOT IN X ARCHERY',
     'tagline': 'Archery sport items, sports goods, gifts & novelties',
     # Configure private shop details through Streamlit secrets (COMPANY_*).
-    'address': '', 'phone': '', 'gstin': '', 'bank': '',
+    'address': '', 'phone': '', 'gstin': '36APAPK0224P12Y', 'bank': '',
 }
 
 
