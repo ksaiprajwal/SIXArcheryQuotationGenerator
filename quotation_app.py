@@ -1,190 +1,228 @@
+from copy import deepcopy
+import hmac
+import os
+from datetime import date
+from pathlib import Path
 import streamlit as st
-from fpdf import FPDF
-from PIL import Image
-import io
+from billing import DEFAULT_COMPANY, new_document, item, totals, validate, duplicate
+from storage import Store, ConflictError
+from pdf_renderer import generate_pdf
 
-st.set_page_config(page_title="Archery Quotation Generator", layout="centered")
-st.title("SIX Archery Quotation Generator")
+st.set_page_config(page_title='Shoot In X | Bills & Quotations', page_icon='🏹', layout='centered')
+st.markdown('''<style>
+.block-container {max-width:850px;padding-top:2rem;padding-bottom:5rem}
+h1 {font-size:2rem!important;letter-spacing:-.04em}
+h2 {font-size:1.4rem!important} h3 {font-size:1.15rem!important}
+.stButton button,.stDownloadButton button {min-height:50px;font-size:1rem;border-radius:12px}
+input,textarea {font-size:17px!important} label p {font-size:16px!important}
+[data-testid="stMetricValue"] {font-size:1.8rem}
+@media(max-width:600px) {.block-container {padding:1rem 1rem 4rem} h1 {font-size:1.65rem!important}}
+</style>''', unsafe_allow_html=True)
 
-# --- Company Branding (actual images) ---
-COMPANY_HEADER_PATH = "header.png"
-SIGNATURE_PATH = "signature.png"
+def setting(name, default=''):
+    try:
+        return st.secrets.get(name, os.environ.get(name, default))
+    except FileNotFoundError:
+        return os.environ.get(name, default)
 
-from datetime import datetime
+local = setting('LOCAL_DEMO', 'false').lower() == 'true'
+password = setting('APP_PASSWORD')
+st.title('Shoot In X Archery')
+st.caption('Bills & quotations, made simple.')
+if not local:
+    if not password or len(password) < 12:
+        st.info('One-time setup needed: add DATABASE_URL and a strong APP_PASSWORD in Streamlit settings. See the README in GitHub.')
+        st.stop()
+    if not st.session_state.get('authenticated'):
+        with st.form('login'):
+            entered = st.text_input('Shop password', type='password')
+            if st.form_submit_button('Open my documents', type='primary', use_container_width=True):
+                if hmac.compare_digest(entered.encode(), password.encode()):
+                    st.session_state.authenticated = True
+                    st.rerun()
+                else:
+                    st.error('Incorrect password. Please try again.')
+        st.stop()
+else:
+    st.warning('Local demo: saved documents are on this computer only. Do not use this mode on Streamlit Cloud.')
 
-def get_today():
-    return datetime.now().strftime("%d %m %Y")
+@st.cache_resource
+def connect_store(url, path):
+    return Store(url, path)
 
-# --- Sidebar: Instructions ---
-st.sidebar.header("Instructions")
-st.sidebar.write("""
-1. Enter your product details below. Add more rows as needed.
-2. Fill in the address and any special instructions.
-3. Click 'Generate Quotation PDF' to download your quotation letterhead with branding.
-""")
-
-# --- Product Table Input ---
-st.subheader("Product Details")
-
-if 'products' not in st.session_state:
-    st.session_state['products'] = [{'name': '', 'quantity': 1, 'price': 0.0}]
-
-products = st.session_state['products']
-
-# Dynamic table for products
-for i, product in enumerate(products):
-    st.markdown(f"#### Product {i+1}")
-    product['name'] = st.text_input(f"Product Name", value=product['name'], key=f"name_{i}")
-    product['quantity'] = st.number_input(f"Quantity", min_value=1, value=product.get('quantity'), key=f"qty_{i}", placeholder="")
-    product['price'] = st.number_input(f"Rate", min_value=0.0, value=product.get('price'), key=f"price_{i}", placeholder="")
-    if st.button("Remove", key=f"remove_{i}"):
-        products.pop(i)
+try:
+    store = connect_store(setting('DATABASE_URL'), str(Path(__file__).parent / 'local-demo.sqlite') if local else None)
+except Exception:
+    st.error('Saved documents are unavailable. Check the database connection in Streamlit settings, then retry. No data has been saved.')
+    if st.button('Retry connection'):
+        connect_store.clear()
         st.rerun()
-    st.markdown("---")
+    st.stop()
 
-if st.button("Add Product"):
-    products.append({'name': '', 'quantity': None, 'price': None})
+company = dict(DEFAULT_COMPANY)
+for key in company:
+    company[key] = setting('COMPANY_' + key.upper(), company[key])
+if 'doc' not in st.session_state:
+    st.session_state.doc = new_document(company=company)
+    st.session_state.edit_epoch = 0
+
+
+def open_doc(doc):
+    st.session_state.doc = doc
+    st.session_state.edit_epoch += 1
+    st.session_state.pop('download', None)
+    st.session_state.screen = 'Create / edit'
+
+@st.dialog('Start a new document?')
+def start_new(kind, source=None):
+    st.write('Your current unsaved edits will be replaced. Save them first if you need them.')
+    if st.button('Continue', type='primary', use_container_width=True):
+        open_doc(source or new_document(kind, company))
+        st.rerun()
+
+if 'pending_doc' in st.session_state:
+    open_doc(st.session_state.pop('pending_doc'))
+
+left, right = st.columns(2)
+if left.button('＋ New quotation', use_container_width=True):
+    start_new('Quotation')
+if right.button('＋ New bill', use_container_width=True):
+    start_new('Bill')
+screen = st.radio('Workspace', ['Create / edit', 'Saved documents'], horizontal=True, key='screen', label_visibility='collapsed')
+
+if screen == 'Saved documents':
+    st.subheader('Saved documents')
+    query = st.text_input('Search customer or document number', placeholder='Customer name or Q-2026…')
+    kind = st.selectbox('Show', ['All', 'Quotation', 'Bill'])
+    search_key = (query, kind)
+    if st.session_state.get('search_key') != search_key:
+        st.session_state.history_page = 0
+        st.session_state.search_key = search_key
+    page = st.session_state.get('history_page', 0)
+    try:
+        records = store.list(query, kind, page)
+        if not records:
+            st.info('No saved documents here yet.' if not query else 'No matching documents found.')
+        for saved, updated in records:
+            with st.container(border=True):
+                st.subheader(saved['buyer'])
+                st.write(f"{saved['kind']} · {saved['number']}")
+                st.caption(f"{saved['date']} · Version {saved['version']} · INR {totals(saved)[3]:,.2f}")
+                if st.button('Open / edit', key='open'+saved['id'], use_container_width=True):
+                    # Callback runs before the navigation widget is instantiated on the next run.
+                    st.session_state.pending_doc = store.get(saved['id'])[0]
+                    st.rerun()
+                if st.button('Copy as new', key='copy'+saved['id']):
+                    st.session_state.pending_doc = duplicate(saved)
+                    st.rerun()
+                if saved['kind'] == 'Quotation' and st.button('Convert to bill', key='bill'+saved['id']):
+                    st.session_state.pending_doc = duplicate(saved, 'Bill')
+                    st.rerun()
+                with st.expander('Download PDF / earlier versions'):
+                    # Streamlit expanders run even when closed; gate PDF fetch behind a button.
+                    if st.button('Load saved PDFs', key='load'+saved['id']):
+                        st.session_state['versions'+saved['id']] = store.versions(saved['id'])
+                    versions = st.session_state.get('versions'+saved['id'], [])
+                    if versions:
+                        version = st.selectbox('Version', [v[0] for v in versions], key='version'+saved['id'])
+                        old, pdf = store.get(saved['id'], version)
+                        st.download_button('Download PDF', pdf, f"{old['number']}-v{version}.pdf", 'application/pdf', key='pdf'+saved['id'])
+        prev, nxt = st.columns(2)
+        if prev.button('Previous', disabled=page == 0, use_container_width=True):
+            st.session_state.history_page = page - 1
+            st.rerun()
+        if nxt.button('Next', disabled=len(records) < 20, use_container_width=True):
+            st.session_state.history_page = page + 1
+            st.rerun()
+    except Exception:
+        st.error('Could not load saved documents. Please retry in a moment.')
+    st.stop()
+
+doc = st.session_state.doc
+doc.setdefault('freight', '')
+prefix = f"{doc['id']}-{st.session_state.edit_epoch}-"
+def text(label, field, area=False, **kwargs):
+    fn = st.text_area if area else st.text_input
+    doc[field] = fn(label, value=doc[field], key=prefix+field, **kwargs)
+
+st.subheader(f"{doc['kind']} · {doc['number'] or 'New document'}")
+st.caption('Changes are saved when you tap Save & create PDF below.')
+st.markdown('### 1. Customer')
+text('Customer name *', 'buyer', max_chars=150)
+text('Customer address', 'address', area=True, max_chars=1500)
+doc['date'] = st.date_input('Date', date.fromisoformat(doc['date']), key=prefix+'date').isoformat()
+with st.expander('Customer GST & delivery details (optional)'):
+    text('Customer GSTIN', 'buyer_gstin', max_chars=15)
+    text('State', 'state', max_chars=80)
+    text('State code', 'state_code', max_chars=2)
+    text('Dispatch through', 'dispatch', max_chars=150)
+    text('Freight note (not added to total)', 'freight', max_chars=100)
+
+st.markdown('### 2. Items')
+for index, product in enumerate(doc['items']):
+    key = prefix+product['id']
+    with st.container(border=True):
+        st.markdown(f'**Item {index+1}**')
+        product['name'] = st.text_input('Item name *', product['name'], key=key+'name', max_chars=800)
+        cols = st.columns(2)
+        product['quantity'] = cols[0].number_input('Quantity', min_value=0.01, max_value=1000000.0, value=float(product['quantity']), step=1.0, key=key+'quantity')
+        product['price'] = cols[1].number_input('Rate (INR)', min_value=0.0, max_value=100000000.0, value=float(product['price']), step=10.0, key=key+'price')
+        st.caption(f"Item total: INR {totals({'items':[product], 'taxes':{}})[1]:,.2f}")
+        product['hsn'] = st.text_input('HSN code (optional)', product['hsn'], key=key+'hsn', max_chars=12)
+        if st.button('Remove this item', key=key+'remove', disabled=len(doc['items']) == 1):
+            doc['items'].pop(index)
+            st.session_state.pop('download', None)
+            st.rerun()
+if st.button('＋ Add another item', use_container_width=True):
+    doc['items'].append(item())
+    st.session_state.pop('download', None)
     st.rerun()
 
-# --- Dynamic Total Calculation ---
-valid_products = [p for p in products if p.get('quantity') and p.get('price')]
-total = sum(p['quantity'] * p['price'] for p in valid_products)
-tax = total * 0.05
-grand_total = total + tax
-st.markdown(f"**Current Total:** ₹{total:.2f}  ")
-st.markdown(f"**Tax (5%):** ₹{tax:.2f}  ")
-st.markdown(f"**Grand Total:** ₹{grand_total:.2f}")
-
-# --- Address and Date ---
-st.subheader("Recipient Address & Date")
-address_col, date_col = st.columns([2, 1])
-address = address_col.text_area("To (Recipient Address)")
-today_str = get_today()
-date_val = date_col.text_input("Date", value=today_str)
-
-# --- Special Instructions ---
-st.subheader("Special Instructions")
-instructions = st.text_area(
-    "Special Instructions (will appear at the bottom)",
-    value=(
-        "Transportation cost extra\n"
-        "Hope you find our prices reasonable, expecting your valuable order.\n"
-        "Our GSTN - 36APAPK0224P12Y\n"
-        "SBI Account No. - 36003509100\n"
-        "Account name - Shoot In X Archery\n"
-        "IFSC code - SBIN0001342\n"
-        "Branch - Osmanjung, M.J. Road, Hyderabad - 500195"
-    )
-)
-
-# --- PDF Generation ---
-def generate_pdf(products, address, date_val, instructions, header_path, signature_path):
-    pdf = FPDF()
-    pdf.add_page()
-    # Company header image
+st.markdown('### 3. Tax & notes')
+modes = ['CGST + SGST', 'IGST', 'No GST', 'Choose individually']
+initial = 1 if 'IGST' in doc['taxes'] else (0 if set(doc['taxes']) == {'CGST','SGST'} else (2 if not doc['taxes'] else 3))
+mode = st.selectbox('Tax to show on this document', modes, index=initial, key=prefix+'taxmode')
+if mode == 'Choose individually':
+    choices = st.multiselect('Tax rows', ['CGST','SGST','IGST'], default=list(doc['taxes']), key=prefix+'taxchoices')
+else:
+    choices = {'CGST + SGST':['CGST','SGST'], 'IGST':['IGST'], 'No GST':[]}[mode]
+rates = {}
+for name in choices:
+    rates[name] = st.number_input(f'{name} rate (%)', min_value=0.0, max_value=100.0,
+        value=float(doc['taxes'].get(name, 12.0 if name == 'IGST' else 6.0)), step=0.5, key=prefix+name)
+doc['taxes'] = rates
+if 'IGST' in rates and ('CGST' in rates or 'SGST' in rates):
+    st.error('Select IGST or CGST / SGST. Remove the conflicting tax rows before saving.')
+text('Message at the top (optional)', 'top_note', area=True, max_chars=1000, placeholder='For example: Kind attention: Coach Sharma')
+with st.expander('Bottom notes & signature'):
+    text('Notes / terms', 'notes', area=True, max_chars=3000)
+    doc['signed'] = st.checkbox('Include saved signature', value=doc['signed'], key=prefix+'signed')
+with st.expander('Shop & bank details on this document'):
+    st.caption('Shop GSTIN is separate from customer GSTIN. Shop details come from private settings; saved documents retain their own copy.')
+    for field, label in [('name','Shop name'),('tagline','Tagline'),('address','Shop address'),('phone','Phone'),('gstin','Shop GSTIN'),('bank','Bank details')]:
+        doc['company'][field] = st.text_area(label, doc['company'][field], key=prefix+'company'+field, max_chars=500) if field in ('address','bank') else st.text_input(label, doc['company'][field], key=prefix+'company'+field, max_chars=150)
+_, subtotal, taxes, grand = totals(doc)
+with st.container(border=True):
+    st.write(f'Subtotal: INR {subtotal:,.2f}')
+    for name, value in taxes.items():
+        st.write(f'{name} ({rates[name]:g}%): INR {value:,.2f}')
+    st.metric('Total amount', f'INR {grand:,.2f}')
+if st.button('Save & create PDF', type='primary', use_container_width=True):
     try:
-        pdf.image(header_path, x=0, y=0, w=210)  # Full width for A4
-        pdf.set_y(45)  # Start content just below the header image
+        validate(doc)
+        with st.spinner('Saving your document…'):
+            saved, pdf = store.save(doc, generate_pdf)
+        st.session_state.doc = doc = saved
+        st.session_state.download = (deepcopy(saved), pdf)
+        st.success(f"Saved as {saved['number']}. You can reopen it in Saved documents.")
+    except (ValueError, ConflictError) as exc:
+        st.error(str(exc))
     except Exception:
-        pdf.set_font("Arial", 'B', 20)
-        pdf.set_text_color(200, 200, 200)
-        pdf.cell(0, 30, '[Company Header Here]', ln=1, align='C')
-        pdf.set_text_color(0, 0, 0)
-    # Address and date row
-    # Use smaller font for address/date
-    pdf.set_font("Arial", '', 10)
-    y_before = pdf.get_y()
-    # Render address (left)
-    pdf.set_xy(10, y_before)
-    pdf.multi_cell(120, 6, f"To:\n{address}")
-    y_after_address = pdf.get_y()
-    # Render date (right, at y_before)
-    pdf.set_xy(150, y_before)
-    pdf.cell(40, 6, f"Date: {date_val}", ln=1, align='R')
-    y_after_date = y_before + 6  # 6 is the height of the date cell
-    # Set y to the lower of the two
-    pdf.set_y(max(y_after_address, y_after_date) + 2)
-    # Table header
-    pdf.set_font("Arial", '', 10)
-    pdf.set_fill_color(220, 220, 220)
-    pdf.cell(12, 8, 'S.No', 1, 0, 'C', 1)
-    pdf.cell(75, 8, 'Product', 1, 0, 'C', 1)
-    pdf.cell(28, 8, 'Quantity', 1, 0, 'C', 1)
-    pdf.cell(35, 8, 'Rate', 1, 0, 'C', 1)
-    pdf.cell(35, 8, 'Total', 1, 1, 'C', 1)
-    # Table rows
-    pdf.set_fill_color(255, 255, 255)
-    for idx, p in enumerate(products, 1):
-        total = p['quantity'] * p['price']
-        # Save the current position
-        x_start = pdf.get_x()
-        y_start = pdf.get_y()
-        # Calculate height needed for product name
-        product_name_width = 75
-        line_height = 8
-        # Estimate number of lines for product name
-        pdf.set_font("Arial", '', 10)
-        product_name_lines = pdf.multi_cell(product_name_width, line_height, p['name'], border=0, align='L', split_only=True)
-        n_lines = len(product_name_lines)
-        row_height = line_height * n_lines
-        # S.No
-        pdf.set_xy(x_start, y_start)
-        pdf.cell(12, row_height, str(idx), 1, 0, 'C')
-        # Product Name
-        pdf.set_xy(x_start + 12, y_start)
-        pdf.multi_cell(product_name_width, line_height, p['name'], border=1, align='L')
-        # Move to right for rest of row
-        x_next = x_start + 12 + product_name_width
-        y_next = y_start
-        pdf.set_xy(x_next, y_next)
-        pdf.cell(28, row_height, str(p['quantity']), 1, 0, 'L')
-        pdf.cell(35, row_height, f"{p['price']:.2f}", 1, 0, 'L')
-        pdf.cell(35, row_height, f"{total:.2f}", 1, 0, 'L')
-        pdf.ln(row_height)
-    # Total, Tax, Grand Total
-    total = sum(p['quantity'] * p['price'] for p in products)
-    tax = total * 0.05
-    grand_total = total + tax
-    pdf.set_font("Arial", 'B', 10)
-    pdf.cell(150, 8, 'Total', 1, 0, 'R')
-    pdf.cell(35, 8, f"{total:.2f}", 1, 1, 'L')
-    pdf.set_font("Arial", '', 10)
-    pdf.cell(150, 8, 'Tax (5%)', 1, 0, 'R')
-    pdf.cell(35, 8, f"{tax:.2f}", 1, 1, 'L')
-    pdf.set_font("Arial", 'B', 10)
-    pdf.cell(150, 8, 'Grand Total', 1, 0, 'R')
-    pdf.cell(35, 8, f"{grand_total:.2f}", 1, 1, 'L')
-    pdf.ln(8)
-    # Special instructions
-    pdf.set_font("Arial", '', 10)
-    pdf.multi_cell(0, 5, instructions)
-    pdf.ln(5)
-    # Regards and name above signature
-    pdf.ln(5)
-    pdf.set_font("Arial", '', 10)
-    pdf.cell(0, 6, "Regards,", ln=1, align='L')
-    pdf.cell(0, 6, "Praveen Kumar Kongalla", ln=1, align='L')
-    pdf.ln(2)
-    # Signature (left and right)
-    y_sig = pdf.get_y()
-    try:
-        pdf.image(signature_path, x=25, y=y_sig, w=25)  # Left
-    except Exception:
-        pdf.set_font("Arial", 'I', 12)
-        pdf.set_text_color(200, 200, 200)
-        pdf.cell(0, 10, '[Signature Here]', ln=1, align='R')
-        pdf.set_text_color(0, 0, 0)
-    return pdf.output(dest='S').encode('latin1')
-
-# --- Generate PDF Button ---
-if st.button("Generate Quotation PDF"):
-    pdf_bytes = generate_pdf(products, address, date_val, instructions, COMPANY_HEADER_PATH, SIGNATURE_PATH)
-    st.success("Quotation PDF generated!")
-    st.download_button(
-        label="Download Quotation PDF",
-        data=pdf_bytes,
-        file_name="quotation.pdf",
-        mime="application/pdf"
-    )
-
-st.write("\n---\nMade with ❤️ for SIX Archery.")
+        st.error('Could not confirm the save. Your entries are still here. Check Saved documents before retrying if the connection dropped.')
+if 'download' in st.session_state:
+    saved, pdf = st.session_state.download
+    if saved == doc:
+        st.download_button('Download PDF', pdf, f"{saved['number']}.pdf", 'application/pdf', use_container_width=True)
+        st.caption('On your phone, open the downloaded PDF and use Share to send it on WhatsApp.')
+    else:
+        st.info('You have new changes. Tap Save & create PDF to update the saved copy.')
